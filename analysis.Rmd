@@ -1,0 +1,422 @@
+---
+title: "[Group_12]_Project 2 _CDC Diabetes Health Indicators"
+author: "Nhom 12"
+date: "2025-01-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(janitor)
+library(caret)
+library(corrplot)
+library(VIM)
+library(smotefamily)
+library(randomForest)
+library(cowplot)
+```
+
+**Thành viên**
+
+*   Lê Viết Tố Khoa - 22280046
+*   Trần Bá Đông - 22280011
+*   Đoàn Nhật Nam - 22280054
+*   Giang Lệ Ân - 22110010
+*   Võ Hoàng Phúc - 22110163
+
+# Nhập dữ liệu
+
+```{r load-data, message=FALSE, warning=FALSE}
+data_diabetes <- read.csv("data/diabetes_012_health_indicators_BRFSS2015.csv")
+data_diabetes <- data_diabetes |> janitor::clean_names()
+glimpse(data_diabetes)
+```
+
+# **I. Bảng tóm tắt, khái quát dữ liệu**
+
+```{r summary}
+summary_data <- summary(data_diabetes)
+print(summary_data)
+```
+
+-   Bộ dữ liệu bao gồm nhiều biến dự đoán y tế (biến độc lập)
+-   Và một biến mục tiêu (biến phụ thuộc) là `diabetes_012`.
+-   Các biến độc lập bao gồm `high_bp`, `high_chol`, `chol_check`, `bmi`, ....
+
+### Chia tập dữ liệu thành nhóm "Diabetes" và "No diabetes"
+
+```{r split-data}
+diabetes_no <- data_diabetes |> filter(diabetes_012 == 0) 
+diabetes_yes <- data_diabetes |> filter(diabetes_012 != 0)
+new_diabetes <- data_diabetes |> mutate(group = ifelse(diabetes_012 == 0, "No diabetes", "Diabetes"))
+```
+
+### Trực quan hóa sự mất cân bằng
+
+```{r plot-imbalance}
+target_count <- function(data) {
+  outcome_counts <- table(data$group)
+  outcomes <- names(outcome_counts)
+  counts <- as.numeric(outcome_counts)
+  ggplot(aes(x = counts, y = outcomes), data = data.frame(counts, outcomes)) +
+    geom_bar(stat = "identity", fill = c("lightskyblue", "gold"), color = "black") +
+    labs(title = "Count of Outcome Variable", x = "Number of Individuals", y = "Outcome") +
+    coord_flip() +
+    theme_bw() +
+    theme(text = element_text(size = 15))
+}
+target_count(new_diabetes)
+```
+
+-   Biểu đồ trên cho thấy dữ liệu không cân bằng.
+-   Số người không mắc bệnh tiểu đường là `r nrow(diabetes_no)`, trong khi số bệnh nhân tiểu đường là `r nrow(diabetes_yes)`.
+
+### Kiểm tra giá trị thiếu (Missing Values)
+
+```{r check-missing}
+sum(is.na(data_diabetes))
+aggr(data_diabetes, col = c("blue", "red"), numbers = TRUE, sortVars = TRUE, 
+     labels = names(data_diabetes), cex.axis = 0.5, gap = 3, ylab = c("Missing data", "Pattern"))
+```
+
+*Kết luận: Dữ liệu đã sạch, không có giá trị null, tên cột có ý nghĩa, và kiểu dữ liệu chính xác, sẵn sàng để phân tích thêm.*
+
+# **II. Phân tích Khám phá Dữ liệu (EDA)**
+
+## Phân bố Giới tính
+
+```{r gender-plot, fig.width=10, fig.height=5}
+# Biểu đồ cho nhóm no-diabetes
+plot1 <- ggplot(diabetes_no, aes(x = as.factor(sex), fill = as.factor(sex))) +
+  geom_bar() +
+  scale_fill_manual(values = c("#1f77b4", "#ff7f0e")) +
+  labs(title = "Gender distribution for no-diabetes", x = "Sex", y = "Count", fill = "Gender") +
+  scale_x_discrete(labels = c("Female", "Male")) +
+  ylim(0, max(table(diabetes_no$sex), table(diabetes_yes$sex))) + 
+  theme_minimal()
+
+# Biểu đồ cho nhóm diabetics
+plot2 <- ggplot(diabetes_yes, aes(x = as.factor(sex), fill = as.factor(sex))) +
+  geom_bar() +
+  scale_fill_manual(values = c("#1f77b4", "#ff7f0e")) +
+  labs(title = "Gender distribution for diabetics", x = "Sex", y = "Count", fill = "Gender") +
+  scale_x_discrete(labels = c("Female", "Male")) +
+  ylim(0, max(table(diabetes_no$sex), table(diabetes_yes$sex))) + 
+  theme_minimal()
+
+# Kết hợp hai biểu đồ
+combined_plot <- plot_grid(plot1, plot2, ncol = 2, align = "hv")
+combined_plot
+```
+
+*Nhận xét: Cả nam và nữ đều có nguy cơ mắc bệnh tiểu đường.*
+
+## Phân bố Tuổi
+
+```{r age-distribution}
+ggplot(diabetes_yes, aes(x = as.factor(age))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Age distribution for Diabetics", x = "Age Group") +
+  scale_x_discrete(labels = c("18-24", "25-29", "30-34", "35-39", "40-44", "45-49", 
+                              "50-54", "55-59", "60-64", "65-69", "70-74", "75-79", ">80")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+*Nhận xét: Các nhóm tuổi bị ảnh hưởng nhiều nhất bởi bệnh tiểu đường là 60-64, 65-70, và 70-74.*
+
+## Phân bố BMI
+
+*Loại bỏ các giá trị ngoại lệ (BMI < 15 và > 60) để hiển thị rõ hơn.*
+
+```{r bmi-distribution, warning=FALSE, fig.width=10, fig.height=5}
+diabetes_yes_filtered <- subset(diabetes_yes, bmi >= 15 & bmi <= 60)
+diabetes_no_filtered <- subset(diabetes_no, bmi >= 15 & bmi <= 60)
+
+plot1 <- ggplot(diabetes_yes_filtered, aes(x = bmi)) +
+  geom_histogram(fill = "steelblue", color = "black", binwidth = 2) + 
+  labs(title = "BMI distribution for Diabetics", x = "BMI") +
+  xlim(15, 60) + 
+  theme_bw() 
+
+plot2 <- ggplot(diabetes_no_filtered, aes(x = bmi)) +
+  geom_histogram(fill = "steelblue", color = "black", binwidth = 2) + 
+  labs(title = "BMI distribution for No diabetics", x = "BMI") +
+  xlim(15, 60) + 
+  theme_bw() 
+
+combined_plot <- plot_grid(plot1, plot2, ncol = 2, align = "hv")
+combined_plot
+```
+
+*Nhận xét: Biểu đồ của người bị tiểu đường (trái) tập trung ở khoảng BMI cao hơn so với nhóm không bị tiểu đường (phải).*
+
+```{r bmi-boxplot, fig.width=10, fig.height=5}
+plot1 <- ggplot(diabetes_yes_filtered, aes(y = bmi)) + 
+  geom_boxplot() +
+  labs(title = "BMI distribution for diabetics", x = "", y = "BMI") +
+  ylim(15, 60) +
+  theme_bw() 
+
+plot2 <- ggplot(diabetes_no_filtered, aes(y = bmi)) + 
+  geom_boxplot() +
+  labs(title = "BMI distribution for no diabetics", x = "", y = "BMI") +
+  ylim(15, 60) +
+  theme_bw()
+
+combined_plot <- plot_grid(plot1, plot2, ncol = 2, align = "hv")
+combined_plot
+```
+
+*Nhận xét: Người bị tiểu đường có xu hướng có BMI cao hơn so với nhóm không bị tiểu đường.*
+
+## Các yếu tố khác
+
+```{r other-factors-1, fig.width=10, fig.height=5}
+plot1 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(high_chol))) +
+  geom_bar(position = "dodge") +  
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("No", "Yes")) +  
+  labs(title = "Tình trạng tiểu đường theo Cholesterol cao",
+       x = "Nhóm", y = "Số lượng", fill = "Cholesterol cao") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) + 
+  theme_minimal()
+
+plot2 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(high_bp))) +
+  geom_bar(position = "dodge") +  
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("No", "Yes")) +  
+  labs(title = "Tình trạng tiểu đường theo Huyết áp cao",
+       x = "Nhóm", y = "Số lượng", fill = "Huyết áp cao") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) +  
+  theme_minimal()
+
+plot_grid(plot1, plot2, ncol = 2, align = "hv")
+```
+
+*Nhận xét: Người bệnh tiểu đường thường có mức cholesterol và huyết áp cao hơn.*
+
+```{r other-factors-2, fig.width=10, fig.height=5}
+plot1 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(phys_activity))) +
+  geom_bar(position = "dodge") + 
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("Không", "Có")) +  
+  labs(title = "Tình trạng tiểu đường theo Hoạt động thể chất",
+       x = "Nhóm", y = "Số lượng", fill = "Hoạt động thể chất") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) + 
+  theme_minimal()
+
+plot2 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(diff_walk))) +
+  geom_bar(position = "dodge") + 
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("Không", "Có")) +  
+  labs(title = "Tình trạng tiểu đường theo Khó đi lại",
+       x = "Nhóm", y = "Số lượng", fill = "Khó đi lại") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) +  
+  theme_minimal()
+
+plot_grid(plot1, plot2, ncol = 2, align = "hv")
+```
+
+*Nhận xét: Người bệnh tiểu đường ít hoạt động thể chất và gặp khó khăn khi đi lại nhiều hơn.*
+
+```{r other-factors-3, fig.width=10, fig.height=5}
+plot1 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(smoker))) +
+  geom_bar(position = "dodge") + 
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("Không", "Có")) +  
+  labs(title = "Tình trạng tiểu đường theo Hút thuốc",
+       x = "Nhóm", y = "Số lượng", fill = "Hút thuốc") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) + 
+  theme_minimal()
+
+plot2 <- ggplot(new_diabetes, aes(x = group, fill = as.factor(hvy_alcohol_consump))) +
+  geom_bar(position = "dodge") + 
+  scale_fill_manual(values = c("lightblue", "gold"), labels = c("Không", "Có")) +  
+  labs(title = "Tình trạng tiểu đường theo Uống nhiều rượu",
+       x = "Nhóm", y = "Số lượng", fill = "Uống nhiều rượu") +
+  scale_x_discrete(labels = c("Tiểu đường", "Không tiểu đường")) +  
+  theme_minimal()
+
+plot_grid(plot1, plot2, ncol = 2, align = "hv")
+```
+
+*Nhận xét: Hút thuốc và uống rượu không cho thấy sự khác biệt rõ rệt giữa hai nhóm.*
+
+### Ma trận Tương quan
+
+```{r correlation-matrix, fig.width=10, fig.height=10}
+cor_diabetes <- cor(data_diabetes, method = "pearson")
+corrplot(cor_diabetes, method = "circle", type = "lower", tl.cex = 0.7)
+```
+
+*Nhận xét: Các biến có tương quan mạnh nhất với `diabetes_012` là `gen_hlth`, `high_bp`, `bmi`, `diff_walk`, và `high_chol`.*
+
+# **III. Kiểm định Giả thuyết**
+
+### 1. Người không mắc bệnh tiểu đường và người mắc bệnh tiểu đường có cùng chỉ số BMI không?
+
+```{r hypothesis-1-summary}
+new_diabetes |> group_by(group) |>
+  summarise(n = n(), mean = mean(bmi), sd = sd(bmi))
+```
+
+*Nhận xét: Trung bình BMI của nhóm mắc bệnh tiểu đường (31.8) cao hơn nhóm không mắc bệnh (27.7).*
+
+**Giả thuyết:**
+- H0: Chỉ số BMI trung bình của hai nhóm là như nhau.
+- H1: Chỉ số BMI trung bình của hai nhóm là khác nhau.
+
+```{r hypothesis-1-test}
+# Định nghĩa các tham số
+nA <- sum(new_diabetes$group == 'Diabetes')
+nB <- sum(new_diabetes$group == 'No diabetes')
+
+# Hàm hoán vị
+perm_fun <- function(x, nA, nB, R) {
+  n <- nA + nB
+  mean_diff <- numeric(R)
+  for (i in 1:R){
+    idx_a <- sample(x = 1:n, size = nA)
+    idx_b <- setdiff(x = 1:n, y = idx_a)
+    mean_diff[i] <- mean(x[idx_a]) - mean(x[idx_b])
+  }
+  return(mean_diff)
+}
+
+# Chạy hoán vị
+set.seed(21)
+R <- 100
+diff_mean_perm <- perm_fun(new_diabetes$bmi, nA, nB, R)
+
+# Tính sự khác biệt thực tế
+mean_a <- mean(new_diabetes$bmi[new_diabetes$group == 'Diabetes'])
+mean_b <- mean(new_diabetes$bmi[new_diabetes$group == 'No diabetes'])
+
+# Tính p-value
+p_value <- mean(abs(diff_mean_perm) >= abs(mean_a - mean_b))
+p_value
+```
+
+*Kết luận: Với p-value = 0 (nhỏ hơn α = 0.05), chúng ta bác bỏ giả thuyết H0. Có sự khác biệt ý nghĩa thống kê về chỉ số BMI trung bình giữa hai nhóm.*
+
+### 2. Tỷ lệ cholesterol cao có khác nhau đáng kể giữa hai nhóm không?
+
+**Giả thuyết:**
+- H0: Tỷ lệ cholesterol cao không khác biệt đáng kể giữa hai nhóm.
+- H1: Tỷ lệ cholesterol cao có sự khác biệt.
+
+```{r hypothesis-2-test}
+contingency <- table(new_diabetes$diabetes_012, new_diabetes$high_chol)
+chi2_test <- chisq.test(contingency)
+cat("Chi-squared Statistic:", chi2_test$statistic, "\n")
+cat("p-value:", chi2_test$p.value, "\n")
+```
+
+*Kết luận: Với p-value = 0 (nhỏ hơn α = 0.05), chúng ta bác bỏ H0. Tỷ lệ cholesterol cao giữa hai nhóm có sự khác biệt ý nghĩa thống kê.*
+
+### 3. Tỷ lệ huyết áp cao có khác nhau đáng kể giữa hai nhóm không?
+
+**Giả thuyết:**
+- H0: Tỷ lệ huyết áp cao không khác biệt đáng kể giữa hai nhóm.
+- H1: Tỷ lệ huyết áp cao có sự khác biệt.
+
+```{r hypothesis-3-test}
+contingency <- table(new_diabetes$diabetes_012, new_diabetes$high_bp)
+chi2_test <- chisq.test(contingency)
+cat("Chi-squared Statistic:", chi2_test$statistic, "\n")
+cat("p-value:", chi2_test$p.value, "\n")
+```
+
+*Kết luận: Với p-value = 0 (nhỏ hơn α = 0.05), chúng ta bác bỏ H0. Tỷ lệ huyết áp cao giữa hai nhóm có sự khác biệt ý nghĩa thống kê.*
+
+# **IV. Xây dựng Mô hình**
+
+## 1. Mô hình Logistic Regression
+
+```{r model-prep-1}
+new_diabetes <- new_diabetes %>% mutate(group = as.factor(group))
+
+# Xác định đặc trưng và mục tiêu
+X <- new_diabetes %>% select(-diabetes_012, -group)
+y <- new_diabetes$group
+
+# Lựa chọn đặc trưng bằng Chi-squared
+chi_square_results <- sapply(X, function(col) {
+  suppressWarnings(chisq.test(table(col, y)))$statistic
+})
+
+# Chọn 6 đặc trưng quan trọng nhất
+selected_features <- names(sort(chi_square_results, decreasing = TRUE))[2:7]
+important_features <- gsub("\\.X-squared$", "", selected_features)
+print(important_features)
+```
+
+*Các biến được chọn: `high_bp`, `bmi`, `diff_walk`, `high_chol`, `age`, `phys_hlth`.*
+
+```{r model-smote}
+# Chia dữ liệu trước khi xử lý mất cân bằng
+set.seed(123)
+index <- createDataPartition(new_diabetes$group, p = 0.8, list = FALSE)
+train_data <- new_diabetes[index, ]
+test_data <- new_diabetes[-index, ]
+
+# Xử lý mất cân bằng trên tập huấn luyện bằng SMOTE
+train_data_smote <- smote(df = train_data, var = "group", k = 5, over_ratio = 1)
+
+# Kiểm tra kết quả
+print("Tình trạng cân bằng SAU SMOTE:")
+print(table(train_data_smote$group))
+```
+
+```{r logistic-regression}
+# Chuẩn bị dữ liệu cho mô hình
+y_train <- as.factor(train_data_smote$group) 
+X_train <- train_data_smote %>% select(all_of(important_features))
+y_test <- as.factor(test_data$group) 
+X_test <- test_data %>% select(all_of(important_features))
+
+# Chuẩn hóa các đặc trưng
+preprocessor <- preProcess(X_train, method = "scale")
+X_train_scaled <- predict(preprocessor, X_train)
+X_test_scaled <- predict(preprocessor, X_test)
+
+# Huấn luyện mô hình Logistic Regression với Cross-validation
+train_data_final <- data.frame(X_train_scaled, group = y_train)
+set.seed(123)
+model_logistic <- train(
+  group ~ ., 
+  data = train_data_final,
+  method = "glmnet",
+  family = "binomial",
+  metric = "Accuracy",
+  trControl = trainControl(
+    method = "cv", 
+    number = 10, 
+    verboseIter = FALSE
+  )
+)
+
+# Dự đoán và đánh giá
+y_pred_probs <- predict(model_logistic, newdata = X_test_scaled, type = "prob")
+y_pred_logistic <- ifelse(y_pred_probs[, "Diabetes"] > 0.5, "Diabetes", "No diabetes")
+y_pred_logistic <- as.factor(y_pred_logistic)
+levels(y_pred_logistic) <- levels(y_test)
+
+# Ma trận nhầm lẫn
+class_report_logistic <- caret::confusionMatrix(y_pred_logistic, y_test)
+print(class_report_logistic)
+```
+
+## 2. Mô hình Random Forest
+
+```{r random-forest}
+# Dữ liệu đã được chuẩn bị từ bước trước
+set.seed(123) 
+model_rf <- randomForest(x = X_train, y = y_train, 
+                         ntree = 500, 
+                         mtry = sqrt(ncol(X_train)), 
+                         importance = TRUE)
+
+# Dự đoán trên tập kiểm tra
+y_pred_rf <- predict(model_rf, newdata = X_test)
+
+# Đánh giá mô hình
+confusion_matrix_rf <- caret::confusionMatrix(y_pred_rf, y_test)
+print(confusion_matrix_rf)
+```

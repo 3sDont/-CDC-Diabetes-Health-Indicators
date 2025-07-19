@@ -1,0 +1,20 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+
+# User-specific files
+.Rproj.user/
+
+# R Environment files
+.Renviron
+
+# Knitr cache
+*_cache/
+/cache/
+
+# R Markdown intermediate files
+*.utf8.md
+*.knit.md

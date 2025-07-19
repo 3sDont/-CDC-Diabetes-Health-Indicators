@@ -1,4 +1,4 @@
-# Project 2: Phân tích và Xây dựng Mô hình Dự đoán Bệnh Tiểu đường
+# Project: Phân tích và Xây dựng Mô hình Dự đoán Bệnh Tiểu đường
 
 Dự án này phân tích bộ dữ liệu "CDC Diabetes Health Indicators" từ khảo sát BRFSS 2015 để tìm ra các yếu tố ảnh hưởng chính và xây dựng mô hình dự đoán khả năng mắc bệnh tiểu đường.
 

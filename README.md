@@ -5,14 +5,14 @@ Dự án này phân tích bộ dữ liệu "CDC Diabetes Health Indicators" từ
 ## Cấu trúc Thư mục
 
 ```
-.
-├── data/
-│   └── diabetes_012_health_indicators_BRFSS2015.csv   # Dữ liệu gốc
-├── report/
-│   └── Bao_cao_Nhom12_project2.html                   # Báo cáo kết quả phân tích
-├── .gitignore
-├── README.md                                          # File giới thiệu dự án
-└── analysis.Rmd                                       # File mã nguồn R Markdown
+-CDC-Diabetes-Health-Indicators
+    ├── data/
+    │   └── diabetes_012_health_indicators_BRFSS2015.csv   # Dữ liệu gốc
+    ├── report/
+    │   └── Bao_cao_Nhom12_project2.html                   # Báo cáo kết quả phân tích
+    ├── .gitignore
+    ├── README.md                                          # File giới thiệu dự án
+    └── analysis.Rmd                                       # File mã nguồn R Markdown
 ```
 
 ## Dữ liệu

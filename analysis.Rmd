@@ -16,15 +16,6 @@ library(smotefamily)
 library(randomForest)
 library(cowplot)
 ```
-
-**Thành viên**
-
-*   Lê Viết Tố Khoa - 22280046
-*   Trần Bá Đông - 22280011
-*   Đoàn Nhật Nam - 22280054
-*   Giang Lệ Ân - 22110010
-*   Võ Hoàng Phúc - 22110163
-
 # Nhập dữ liệu
 
 ```{r load-data, message=FALSE, warning=FALSE}
